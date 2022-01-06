@@ -3,6 +3,10 @@ library(stringr)
 library(RJDBC)
 library(tidyverse)
 library(lubridate)
+library(aws.s3)
+library(aws.ec2metadata)
+library(rjson)
+library(httr)
 
 
 ######### Get Redshift creds #########
@@ -61,65 +65,65 @@ for (date in 1:length(dates)) {
   dt = ymd(dates[date])
   tbl_name <- paste0("bbc_bitesize_", gsub('-', '', dt))
   tbl_names_list<-tbl_names_list%>%append(tbl_name)
-  print(dt)
-  print(tbl_name)
-  dbSendUpdate(
-    conn,
-  
-    paste0("
-           CREATE TABLE central_insights_sandbox.",
-           tbl_name,
-           " AS
-    SELECT DISTINCT audience_id,
-    dt::date                     as date_of_event,
-    page_name,
-    content_id,
-    app_name,
-    app_type,
-    device_type,
-    browser_brand,
-    destination,
-    page_views_total,
-    event_datetime_min::datetime as event_datetime_min,
-    event_datetime_max::datetime as event_datetime_max,
-    NULL                         as location,
-    NULL                         as town,
-    NULL                         as nation,
-    NULL                         as barb_region,
-    NULL                         as acorn_category_description
-    FROM s3_audience.audience_activity_daily_summary
-    WHERE dt = '",
-      gsub('-', '', dt),
-      "'
-      AND destination = 'PS_BITESIZE'
-      AND length(audience_id) != 43
-
-    UNION
-    SELECT DISTINCT audience_id,
-                    date_of_event::date          as date_of_event,
-                    page_name,
-                    content_id,
-                    app_name,
-                    app_type,
-                    device_type,
-                    browser_brand,
-                    destination,
-                    page_views_total,
-                    event_datetime_min::datetime as event_datetime_min,
-                    event_datetime_max::datetime as event_datetime_max,
-                    location,
-                    town,
-                    nation,
-                    barb_region,
-                    acorn_category_description
-    FROM audience.audience_activity_daily_summary_enriched
-    WHERE date_of_event = '",
-      dt,
-      "'
-      AND destination = 'PS_BITESIZE';
-                      "
-    )
-  )
+  # print(dt)
+  # print(tbl_name)
+  # dbSendUpdate(
+  #   conn,
+  # 
+  #   paste0("
+  #          CREATE TABLE central_insights_sandbox.",
+  #          tbl_name,
+  #          " AS 
+  #   SELECT DISTINCT audience_id,
+  #   dt::date                     as date_of_event,
+  #   page_name,
+  #   content_id,
+  #   app_name,
+  #   app_type,
+  #   device_type,
+  #   browser_brand,
+  #   destination,
+  #   page_views_total,
+  #   event_datetime_min::datetime as event_datetime_min,
+  #   event_datetime_max::datetime as event_datetime_max,
+  #   NULL                         as location,
+  #   NULL                         as town,
+  #   NULL                         as nation,
+  #   NULL                         as barb_region,
+  #   NULL                         as acorn_category_description
+  #   FROM s3_audience.audience_activity_daily_summary
+  #   WHERE dt = '",
+  #     gsub('-', '', dt),
+  #     "'
+  #     AND destination = 'PS_BITESIZE'
+  #     AND length(audience_id) != 43
+  # 
+  #   UNION
+  #   SELECT DISTINCT audience_id,
+  #                   date_of_event::date          as date_of_event,
+  #                   page_name,
+  #                   content_id,
+  #                   app_name,
+  #                   app_type,
+  #                   device_type,
+  #                   browser_brand,
+  #                   destination,
+  #                   page_views_total,
+  #                   event_datetime_min::datetime as event_datetime_min,
+  #                   event_datetime_max::datetime as event_datetime_max,
+  #                   location,
+  #                   town,
+  #                   nation,
+  #                   barb_region,
+  #                   acorn_category_description
+  #   FROM audience.audience_activity_daily_summary_enriched
+  #   WHERE date_of_event = '",
+  #     dt,
+  #     "'
+  #     AND destination = 'PS_BITESIZE';
+  #                     "
+  #   )
+  # )
 }
 
 
@@ -128,62 +132,62 @@ for (date in 4:length(dates)) {
   dt = ymd(dates[date])
   tbl_name <- paste0("bbc_iplayer_bitesize_", gsub('-', '', dt))
   tbl_names_list<-tbl_names_list%>%append(tbl_name)
-  print(dt)
-  print(tbl_name)
-  dbSendUpdate(
-    conn,
-    
-    paste0("
-           CREATE TABLE central_insights_sandbox.",
-           tbl_name,
-           " AS
-    SELECT DISTINCT audience_id,
-                date_of_event::date          as date_of_event,
-                page_name,
-                app_name,
-                app_type,
-                version_id,
-                device_type,
-                browser_brand,
-                av_content_type,
-                destination,
-                geo_country_site_visited,
-                playback_time_total,
-                play_event_count,
-                pause_event_count,
-                end_event_count,
-                page_views_total,
-                event_datetime_min::datetime as event_datetime_min,
-                event_datetime_max::datetime as event_datetime_max,
-                location,
-                town,
-                nation,
-                barb_region,
-                acorn_category_description,
-                on_air_version_id,
-                top_level_editorial_object,
-                programme_title,
-                master_brand_name,
-                brand_id,
-                brand_title,
-                series_id,
-                series_title,
-                episode_id,
-                episode_title,
-                clip_id,
-                clip_title,
-                pips_genre_level_1_names,
-                bbc_st_pips,
-                programme_duration
-FROM audience.audience_activity_daily_summary_enriched
-    WHERE date_of_event = '",
-           dt,
-           "'
-  AND destination = 'PS_IPLAYER'
-  AND (brand_title ILIKE '%bitesize%' OR top_level_editorial_object ILIKE '%bitesize%');
-                      "
-    )
-  )
+#   print(dt)
+#   print(tbl_name)
+#   dbSendUpdate(
+#     conn,
+#     
+#     paste0("
+#            CREATE TABLE IF NOT EXISTS central_insights_sandbox.",
+#            tbl_name,
+#            " AS 
+#     SELECT DISTINCT audience_id,
+#                 date_of_event::date          as date_of_event,
+#                 page_name,
+#                 app_name,
+#                 app_type,
+#                 version_id,
+#                 device_type,
+#                 browser_brand,
+#                 av_content_type,
+#                 destination,
+#                 geo_country_site_visited,
+#                 playback_time_total,
+#                 play_event_count,
+#                 pause_event_count,
+#                 end_event_count,
+#                 page_views_total,
+#                 event_datetime_min::datetime as event_datetime_min,
+#                 event_datetime_max::datetime as event_datetime_max,
+#                 location,
+#                 town,
+#                 nation,
+#                 barb_region,
+#                 acorn_category_description,
+#                 on_air_version_id,
+#                 top_level_editorial_object,
+#                 programme_title,
+#                 master_brand_name,
+#                 brand_id,
+#                 brand_title,
+#                 series_id,
+#                 series_title,
+#                 episode_id,
+#                 episode_title,
+#                 clip_id,
+#                 clip_title,
+#                 pips_genre_level_1_names,
+#                 bbc_st_pips,
+#                 programme_duration
+# FROM audience.audience_activity_daily_summary_enriched
+#     WHERE date_of_event = '",
+#            dt,
+#            "'
+#   AND destination = 'PS_IPLAYER'
+#   AND (brand_title ILIKE '%bitesize%' OR top_level_editorial_object ILIKE '%bitesize%');
+#                       "
+#     )
+#   )
 }
 
 ################## Upload to s3 ##################
@@ -191,9 +195,21 @@ FROM audience.audience_activity_daily_summary_enriched
 tbl_names_list
 
 
+# unload ('select * from vickys_table')
+# to 's3://mybucket/tickit/unload/venue_' 
+# credentials 'aws_access_key_id=;aws_secret_access_key=;token=
+# parallel off
+# csv;
 
 
-
+get_s3_credentials <- function() {
+  role_name <-httr::content(httr::GET("http://169.254.169.254/latest/meta-data/iam/security-credentials/"))
+  s3credentials <-jsonlite::fromJSON(httr::content(httr::GET(paste0("http://169.254.169.254/latest/meta-data/iam/security-credentials/", role_name))))
+  
+  return(s3credentials)
+}
+s3_bucket <- 'rstudio-input-output'
+s3credentials<- get_s3_credentials()
 
 
 
