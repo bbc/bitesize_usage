@@ -9,33 +9,48 @@ library(rjson)
 library(httr)
 
 
-######### Get Redshift creds #########
-driver <-
-  JDBC(
-    "com.amazon.redshift.jdbc41.Driver",
-    "~/.redshiftTools/redshift-driver.jar",
-    identifier.quote = "`"
-  )
-my_aws_creds <-
-  read.csv(
-    "~/Documents/Projects/DS/redshift_creds.csv",
-    header = TRUE,
-    stringsAsFactors = FALSE
-  )
-url <-
-  paste0(
-    "jdbc:redshift://localhost:5439/redshiftdb?user=",
-    my_aws_creds$user,
-    "&password=",
-    my_aws_creds$password
-  )
-conn <- dbConnect(driver, url)
-# test that it works:
-dbGetQuery(
-  conn,
-  "select distinct version_id, bbc_st_pips, bbc_st_sch, brand_id  from prez.scv_vmb limit 10"
-)
+# ######### Get Redshift creds (local R) #########
+# driver <-
+#   JDBC(
+#     "com.amazon.redshift.jdbc41.Driver",
+#     "~/.redshiftTools/redshift-driver.jar",
+#     identifier.quote = "`"
+#   )
+# my_aws_creds <-
+#   read.csv(
+#     "~/Documents/Projects/DS/redshift_creds.csv",
+#     header = TRUE,
+#     stringsAsFactors = FALSE
+#   )
+# url <-
+#   paste0(
+#     "jdbc:redshift://localhost:5439/redshiftdb?user=",
+#     my_aws_creds$user,
+#     "&password=",
+#     my_aws_creds$password
+#   )
+# conn <- dbConnect(driver, url)
 
+######### Get Redshift creds  MAP #########
+get_redshift_connection <- function() {
+  driver <-
+    JDBC(
+      driverClass = "com.amazon.redshift.jdbc.Driver",
+      classPath = "/usr/lib/drivers/RedshiftJDBC42-no-awssdk-1.2.41.1065.jar",
+      identifier.quote = "`"
+    )
+  url <-
+    str_glue(
+      "jdbc:redshift://live-idl-prod-redshift-component-redshiftcluster-1q6vyltqf8lth.ctm1v7db0ubd.eu-west-1.redshift.amazonaws.com:5439/redshiftdb?user={Sys.getenv('REDSHIFT_USERNAME')}&password={Sys.getenv('REDSHIFT_PASSWORD')}"
+    )
+  conn <- dbConnect(driver, url)
+  return(conn)
+}
+# Variable to hold the connection info
+conn <- get_redshift_connection()
+# test that it works:
+dbGetQuery(conn,"select distinct brand_title, series_title  from prez.scv_vmb limit 10"
+)
 
 ######### dates_required #########
 
@@ -192,25 +207,37 @@ for (date in 4:length(dates)) {
 
 ################## Upload to s3 ##################
 
-tbl_names_list
-
-
-# unload ('select * from vickys_table')
-# to 's3://mybucket/tickit/unload/venue_' 
-# credentials 'aws_access_key_id=;aws_secret_access_key=;token=
-# parallel off
-# csv;
-
-
 get_s3_credentials <- function() {
   role_name <-httr::content(httr::GET("http://169.254.169.254/latest/meta-data/iam/security-credentials/"))
   s3credentials <-jsonlite::fromJSON(httr::content(httr::GET(paste0("http://169.254.169.254/latest/meta-data/iam/security-credentials/", role_name))))
   
   return(s3credentials)
 }
-s3_bucket <- 'rstudio-input-output'
+
 s3credentials<- get_s3_credentials()
 
 
+tbl_names_list
+for(table in 2:length(tbl_names_list)) {
+  sql <- paste0(
+    "
+    UNLOAD ('select * from central_insights_sandbox.",
+    tbl_names_list[table],
+    "')
+    to 's3://map-input-output/vicky/",
+    tbl_names_list[table],
+    "'
+    CREDENTIALS 'aws_access_key_id=<AWS_ACCESS_KEY_ID>;aws_secret_access_key=<AWS_SECRET_ACCESS_KEY>;token=<TOKEN>'
+    parallel off
+    csv
+    ;"
+    )
+  
+  sql <- stringr::str_replace(sql, '<AWS_ACCESS_KEY_ID>', s3credentials$AccessKeyId)
+  sql <- stringr::str_replace(sql,'<AWS_SECRET_ACCESS_KEY>',s3credentials$SecretAccessKey)
+  sql <- stringr::str_replace(sql, '<TOKEN>', s3credentials$Token)
+  
+  dbSendUpdate(conn, sql)
+}
 
 
