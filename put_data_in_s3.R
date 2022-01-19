@@ -5,6 +5,8 @@ library(tidyverse)
 library(lubridate)
 library(rjson)
 library(httr)
+library(aws.ec2metadata)
+library(aws.s3)
 
 
 # ######### Get Redshift creds (local R) #########
@@ -204,6 +206,19 @@ for (date in 4:length(dates)) {
   # )
 }
 
+################## file sizes ##################
+tbl_size<-data.frame(tbl_name = as.character(), num_rows = as.numeric(), pull_into_r = as.character())
+
+for(tbl in 1:length(tbl_names_list)){
+  size <-dbGetQuery(conn, paste0(" SELECT count(*) FROM central_insights_sandbox.",tbl_names_list[tbl],";"))
+  tbl_size<-tbl_size %>% rbind(data.frame(tbl_name = tbl_names_list[tbl], 
+                                          num_rows = size,
+                                          pull_into_r = case_when(size <=2000000 ~ 'Y',
+                                                                  size >2000000 ~ 'N')
+                                          ))
+}
+tbl_size
+
 ################## Upload to s3 ##################
 
 get_s3_credentials <- function() {
@@ -215,29 +230,65 @@ get_s3_credentials <- function() {
 
 s3credentials<- get_s3_credentials()
 
+### this uploads it as an unspecified file, you will need to download and then rename for it to become a .csv file
+## but this doesn't pull the data into R so is good for large files/tables.
+tbl_size %>%filter(pull_into_r == 'N')
+for(table in 1:nrow(tbl_size%>%filter(pull_into_r == 'N'))) {
+  tbl_size$tbl_name[table]
+  if (tbl_size$pull_into_r[table] == "N") {
+    sql <- paste0(
+      "
+      UNLOAD ('select * from central_insights_sandbox.",
+      tbl_names_list[table],
+      "')
+      to 's3://map-input-output/vicky/",
+      tbl_names_list[table] ,
+      "'
+      CREDENTIALS 'aws_access_key_id=<AWS_ACCESS_KEY_ID>;aws_secret_access_key=<AWS_SECRET_ACCESS_KEY>;token=<TOKEN>'
+      parallel off
+      CSV
 
-tbl_names_list
-for(table in 1:length(tbl_names_list)) {
-  sql <- paste0(
-    "
-    UNLOAD ('select * from central_insights_sandbox.",
-    tbl_names_list[table],
-    "')
-    to 's3://map-input-output/vicky/",
-    tbl_names_list[table],
-    "'
-    CREDENTIALS 'aws_access_key_id=<AWS_ACCESS_KEY_ID>;aws_secret_access_key=<AWS_SECRET_ACCESS_KEY>;token=<TOKEN>'
-    parallel off
-    csv
-    ALLOWOVERWRITE
-    ;"
-    )
-  
-  sql <- stringr::str_replace(sql, '<AWS_ACCESS_KEY_ID>', s3credentials$AccessKeyId)
-  sql <- stringr::str_replace(sql,'<AWS_SECRET_ACCESS_KEY>',s3credentials$SecretAccessKey)
-  sql <- stringr::str_replace(sql, '<TOKEN>', s3credentials$Token)
-  
-  dbSendUpdate(conn, sql)
+      ALLOWOVERWRITE
+      ;"
+      )
+
+    sql <-
+      stringr::str_replace(sql, '<AWS_ACCESS_KEY_ID>', s3credentials$AccessKeyId)
+    sql <-
+      stringr::str_replace(sql,
+                           '<AWS_SECRET_ACCESS_KEY>',
+                           s3credentials$SecretAccessKey)
+    sql <- stringr::str_replace(sql, '<TOKEN>', s3credentials$Token)
+
+    dbSendUpdate(conn, sql)
+  }
+
 }
-tbl_names_list
 
+
+
+
+## this pulls in the table from Redshift to an R object and saves to s3 as a .csv, 
+##but pulling in a large table can be difficult and generally this can be a bit slow
+extractDataToS3 <- function(data, table_name = "table-name", bucket = "bucket-name") {
+  filename_final <- paste0(table_name,".csv")# Generate Filename
+  write.csv(data, filename_final, row.names = FALSE)# Write to csv
+  
+  # Put into s3
+  put_object(paste0(getwd(),"/",filename_final) , bucket=bucket)                              # CHANGE bucket= to your s3 folder location
+  message(paste0(filename_final," into S3 complete"))
+}
+
+tbl_size %>%filter(pull_into_r == 'Y')
+for(table in 6:nrow(tbl_size%>%filter(pull_into_r == 'Y'))) {
+  if (tbl_size$pull_into_r[table] == "Y") {
+    sql_query <- paste0("select * from central_insights_sandbox.", tbl_names_list[table])
+    
+    redshift_extract <- dbGetQuery(conn, sql_query)
+    print(redshift_extract %>% nrow())
+    extractDataToS3(redshift_extract,
+                    table_name = tbl_names_list[table], # CHANGE this to a reference to the table you are extracting, it will form part of the csv file name
+                    bucket = 'map-input-output/vicky') # CHANGE this to s3 bucket filepath
+
+    }
+}
